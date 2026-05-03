@@ -29,6 +29,31 @@ def build_multipart_body(boundary: str, file_name: str, file_content: str, t_val
 
 
 class VttSplitTests(unittest.TestCase):
+    def test_handler_get_returns_html_frontend(self):
+        result = handler(
+            {
+                "requestContext": {"http": {"method": "GET"}},
+                "headers": {},
+            },
+            None,
+        )
+        self.assertEqual(200, result["statusCode"])
+        self.assertEqual("text/html; charset=utf-8", result["headers"]["Content-Type"])
+        self.assertIn("VTT Subtitle Splitter", result["body"])
+        self.assertIn("<form id=\"split-form\"", result["body"])
+
+    def test_handler_rejects_unsupported_method(self):
+        result = handler(
+            {
+                "requestContext": {"http": {"method": "PUT"}},
+                "headers": {},
+            },
+            None,
+        )
+        self.assertEqual(405, result["statusCode"])
+        payload = json.loads(result["body"])
+        self.assertIn("Method PUT not allowed", payload["error"])
+
     def test_split_vtt_yields_16_files_for_15m05s_with_60s_chunks(self):
         vtt_text = (
             "WEBVTT\n\n"

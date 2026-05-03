@@ -17,6 +17,178 @@ TIMING_LINE_RE = re.compile(
 )
 SAFE_BASENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
+HOME_PAGE_HTML = """<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VTT Subtitle Splitter</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #111827;
+        color: #f9fafb;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 2rem 1rem 3rem;
+      }
+      .card {
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1.25rem;
+        background: #1f2937;
+      }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+        font-size: 1.75rem;
+      }
+      p,
+      li,
+      label {
+        line-height: 1.5;
+      }
+      form {
+        display: grid;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+      input[type="file"],
+      input[type="number"] {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 0.65rem 0.75rem;
+        background: #0f172a;
+        color: #f8fafc;
+      }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        background: #2563eb;
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button[disabled] {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+      .status {
+        min-height: 1.5rem;
+        margin-top: 0.25rem;
+      }
+      .hint {
+        color: #cbd5e1;
+        font-size: 0.95rem;
+      }
+      code {
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        background: #0b1220;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <h1>VTT Subtitle Splitter</h1>
+        <p>
+          Diese Lambda dient als statische Website (<code>GET</code>) und als API
+          (<code>POST</code>) zugleich. Lade eine WebVTT-Datei hoch und waehle die
+          Chunk-Laenge <code>t</code> in Sekunden.
+        </p>
+        <ul>
+          <li>Ausgabe-Dateien: <code>&lt;name&gt;-1.vtt ... &lt;name&gt;-n.vtt</code></li>
+          <li>Anzahl Dateien: <code>ceil(gesamtdauer / t)</code></li>
+          <li>Leere Chunks sind erlaubt und werden mit ausgegeben.</li>
+        </ul>
+
+        <form id="split-form" method="post" enctype="multipart/form-data">
+          <label>
+            VTT-Datei
+            <input name="file" type="file" accept=".vtt,text/vtt" required />
+          </label>
+          <label>
+            Chunk-Groesse t (Sekunden)
+            <input name="t" type="number" min="1" step="1" value="60" required />
+          </label>
+          <button id="submit-button" type="submit">Splitten und ZIP herunterladen</button>
+          <p id="status" class="status hint" aria-live="polite"></p>
+        </form>
+        <p class="hint">
+          Ohne JavaScript funktioniert das Formular ebenfalls, da es per
+          <code>POST</code> an dieselbe Lambda-URL sendet.
+        </p>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const form = document.getElementById("split-form");
+        const button = document.getElementById("submit-button");
+        const status = document.getElementById("status");
+
+        const extractFilename = (contentDisposition) => {
+          if (!contentDisposition) return "subtitles-chunks.zip";
+          const match = /filename="([^"]+)"/i.exec(contentDisposition);
+          return match ? match[1] : "subtitles-chunks.zip";
+        };
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          status.textContent = "Verarbeite Datei...";
+          button.disabled = true;
+          try {
+            const response = await fetch(window.location.pathname, {
+              method: "POST",
+              body: new FormData(form),
+            });
+
+            if (!response.ok) {
+              let message = `Fehler (${response.status})`;
+              try {
+                const payload = await response.json();
+                if (payload && payload.error) {
+                  message = payload.error;
+                }
+              } catch (_) {
+              }
+              throw new Error(message);
+            }
+
+            const blob = await response.blob();
+            const filename = extractFilename(
+              response.headers.get("content-disposition")
+            );
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = filename;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(url);
+            status.textContent = "Fertig: ZIP-Download gestartet.";
+          } catch (error) {
+            status.textContent = `Fehler: ${error.message}`;
+          } finally {
+            button.disabled = false;
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
+"""
+
 
 @dataclass
 class Cue:
@@ -241,7 +413,7 @@ def get_header(headers: Dict[str, str], key: str) -> Optional[str]:
     return None
 
 
-def response(status_code: int, body: Dict[str, object]) -> Dict[str, object]:
+def json_response(status_code: int, body: Dict[str, object]) -> Dict[str, object]:
     return {
         "statusCode": status_code,
         "headers": {"Content-Type": "application/json"},
@@ -249,14 +421,41 @@ def response(status_code: int, body: Dict[str, object]) -> Dict[str, object]:
     }
 
 
-def handler(event, context):
+def html_response(status_code: int, html: str) -> Dict[str, object]:
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+        },
+        "body": html,
+    }
+
+
+def detect_http_method(event: Dict[str, object]) -> str:
+    request_context = event.get("requestContext") or {}
+    if isinstance(request_context, dict):
+        http_info = request_context.get("http") or {}
+        if isinstance(http_info, dict) and http_info.get("method"):
+            return str(http_info["method"]).upper()
+
+    http_method = event.get("httpMethod")
+    if http_method:
+        return str(http_method).upper()
+
+    if event.get("body") is not None:
+        return "POST"
+    return "GET"
+
+
+def handle_split_request(event: Dict[str, object]) -> Dict[str, object]:
     try:
         headers = event.get("headers") or {}
         content_type = get_header(headers, "Content-Type") or ""
         body = event.get("body")
 
         if body is None:
-            return response(400, {"error": "Request body is required"})
+            return json_response(400, {"error": "Request body is required"})
 
         if event.get("isBase64Encoded"):
             body_bytes = base64.b64decode(body)
@@ -269,7 +468,7 @@ def handler(event, context):
         )
 
         if upload_bytes is None:
-            return response(400, {"error": "No file found in multipart form data"})
+            return json_response(400, {"error": "No file found in multipart form data"})
 
         if "t" not in fields:
             query_params = event.get("queryStringParameters") or {}
@@ -277,20 +476,20 @@ def handler(event, context):
                 fields["t"] = str(query_params["t"])
 
         if "t" not in fields:
-            return response(400, {"error": "Missing required parameter 't'"})
+            return json_response(400, {"error": "Missing required parameter 't'"})
 
         try:
             chunk_seconds = int(fields["t"])
         except ValueError:
-            return response(400, {"error": "Parameter 't' must be an integer in seconds"})
+            return json_response(400, {"error": "Parameter 't' must be an integer in seconds"})
 
         if chunk_seconds <= 0:
-            return response(400, {"error": "Parameter 't' must be > 0"})
+            return json_response(400, {"error": "Parameter 't' must be > 0"})
 
         try:
             vtt_text = upload_bytes.decode("utf-8-sig")
         except UnicodeDecodeError:
-            return response(400, {"error": "Only UTF-8 encoded VTT files are supported"})
+            return json_response(400, {"error": "Only UTF-8 encoded VTT files are supported"})
 
         split_files = split_vtt_file(vtt_text=vtt_text, chunk_seconds=chunk_seconds)
 
@@ -318,6 +517,26 @@ def handler(event, context):
             "body": zip_b64,
         }
     except ValueError as exc:
-        return response(400, {"error": str(exc)})
+        return json_response(400, {"error": str(exc)})
     except Exception as exc:  # pragma: no cover
-        return response(500, {"error": f"Unexpected error: {str(exc)}"})
+        return json_response(500, {"error": f"Unexpected error: {str(exc)}"})
+
+
+def handler(event, context):
+    method = detect_http_method(event or {})
+
+    if method == "GET":
+        return html_response(200, HOME_PAGE_HTML)
+
+    if method == "POST":
+        return handle_split_request(event or {})
+
+    return json_response(
+        405,
+        {
+            "error": (
+                f"Method {method} not allowed. Use GET for the frontend "
+                "or POST for VTT processing."
+            )
+        },
+    )
