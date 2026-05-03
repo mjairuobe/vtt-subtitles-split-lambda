@@ -7,7 +7,7 @@ pipeline {
         ECR_REGISTRY = '423623826655.dkr.ecr.eu-central-1.amazonaws.com'
         ECR_REPOSITORY = 'vtt-subtitles-split-lambda'
         LAMBDA_FUNCTION_NAME = 'vtt-subtitle-splitter'
-        LAMBDA_ROLE_ARN = 'arn:aws:iam::423623826655:role/service-role/vtt-subtitles-split-lambda-role'
+        LAMBDA_ROLE_ARN = 'arn:aws:iam::423623826655:role/lambda-role'
         IMAGE_URI = "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
     }
 
