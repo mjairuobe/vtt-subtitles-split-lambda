@@ -5,6 +5,7 @@ AWS Lambda (Python 3.11, Container Image), die als HTTP API zwei Aufgaben ueber 
 - `POST`: Upload einer Datei mit Endung `.vtt` oder `.txt` (`multipart/form-data`) und ZIP-Download der gesplitteten VTT-Dateien
 
 Die Ausgabedateien werden als `<originalname>-1.vtt` ... `<originalname>-n.vtt` benannt.
+Die Zeitstempel der Untertitel werden dabei **nicht** umgerechnet oder auf `00:00` zurueckgesetzt.
 
 ## Beispiel
 
@@ -13,7 +14,7 @@ Input:
 - `t=60`
 
 Output:
-- `ceil(905/60) = 16` VTT-Dateien im ZIP.
+- `ceil((max_ende - min_start) / 60) = 16` VTT-Dateien im ZIP.
 
 ## HTTP API Endpunkte (gleiche URL)
 
@@ -38,6 +39,8 @@ Alternativ kann `t` auch als Query-Parameter (`?t=60`) uebergeben werden.
 Hinweis:
 - Falls der `WEBVTT`-Header fehlt, ergaenzt die Lambda ihn automatisch, **wenn** gueltige Zeitzeilen gefunden werden.
 - Zeitzeilen muessen so aussehen: `00:00:00.000 --> 00:00:05.000`
+- Nur die **erste** Ausgabedatei enthaelt den WebVTT-Header (inkl. vorhandener Header-Metadaten).
+- Alle weiteren Ausgabedateien enthalten nur die zugeordneten Cue-Bloecke mit den originalen Zeitstempeln.
 
 ## Lambda Responses
 

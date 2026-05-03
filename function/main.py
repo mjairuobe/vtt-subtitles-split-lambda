@@ -195,7 +195,7 @@ class Cue:
     identifier: Optional[str]
     start: float
     end: float
-    settings: str
+    timing_line: str
     text_lines: List[str]
 
 
@@ -220,20 +220,6 @@ def parse_timestamp(value: str) -> float:
     seconds = int(seconds_raw)
     milliseconds = int(milliseconds_raw.ljust(3, "0")[:3])
     return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
-
-
-def format_timestamp(seconds: float) -> str:
-    total_ms = int(round(seconds * 1000))
-    if total_ms < 0:
-        total_ms = 0
-
-    hours = total_ms // 3_600_000
-    rest = total_ms % 3_600_000
-    minutes = rest // 60_000
-    rest = rest % 60_000
-    secs = rest // 1000
-    millis = rest % 1000
-    return f"{hours:02}:{minutes:02}:{secs:02}.{millis:03}"
 
 
 def parse_vtt(vtt_text: str) -> List[Cue]:
@@ -261,12 +247,14 @@ def parse_vtt(vtt_text: str) -> List[Cue]:
         identifier: Optional[str] = None
         timing_candidate = stripped
         timing_match = TIMING_LINE_RE.match(timing_candidate)
+        timing_line = timing_candidate
 
         if not timing_match and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
             timing_match = TIMING_LINE_RE.match(next_line)
             if timing_match:
                 identifier = current
+                timing_line = next_line
                 i += 1
 
         if not timing_match:
@@ -289,7 +277,7 @@ def parse_vtt(vtt_text: str) -> List[Cue]:
                 identifier=identifier,
                 start=start,
                 end=end,
-                settings=timing_match.group("settings"),
+                timing_line=timing_line,
                 text_lines=text_lines,
             )
         )
@@ -297,17 +285,24 @@ def parse_vtt(vtt_text: str) -> List[Cue]:
     return cues
 
 
-def render_vtt(cues: Iterable[Cue]) -> str:
-    lines = ["WEBVTT", ""]
+def render_vtt(cues: Iterable[Cue], include_header: bool, header_lines: List[str]) -> str:
+    lines: List[str] = []
+    if include_header:
+        if header_lines:
+            lines.extend(header_lines)
+        else:
+            lines.extend(["WEBVTT", ""])
+
     for cue in cues:
         if cue.identifier:
             lines.append(cue.identifier)
-        lines.append(
-            f"{format_timestamp(cue.start)} --> {format_timestamp(cue.end)}{cue.settings}"
-        )
+        lines.append(cue.timing_line)
         lines.extend(cue.text_lines)
         lines.append("")
-    return "\n".join(lines) + "\n"
+
+    if not lines:
+        return ""
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def split_cues(cues: List[Cue], chunk_seconds: int) -> List[List[Cue]]:
@@ -317,48 +312,62 @@ def split_cues(cues: List[Cue], chunk_seconds: int) -> List[List[Cue]]:
     if not cues:
         return [[]]
 
+    min_start = min(cue.start for cue in cues)
     max_end = max(cue.end for cue in cues)
-    chunk_count = max(1, math.ceil(max_end / chunk_seconds))
+    timeline_span = max_end - min_start
+    chunk_count = max(1, math.ceil(timeline_span / chunk_seconds))
     chunks: List[List[Cue]] = [[] for _ in range(chunk_count)]
 
     for cue in cues:
-        start_idx = int(cue.start // chunk_seconds)
-        end_idx = int((cue.end - 1e-9) // chunk_seconds)
-
-        for idx in range(start_idx, min(end_idx + 1, chunk_count)):
-            chunk_start = idx * chunk_seconds
-            chunk_end = (idx + 1) * chunk_seconds
-            overlap_start = max(cue.start, chunk_start)
-            overlap_end = min(cue.end, chunk_end)
-            if overlap_end <= overlap_start:
-                continue
-
-            chunks[idx].append(
-                Cue(
-                    identifier=cue.identifier,
-                    start=overlap_start - chunk_start,
-                    end=overlap_end - chunk_start,
-                    settings=cue.settings,
-                    text_lines=list(cue.text_lines),
-                )
-            )
+        idx = int((cue.start - min_start) // chunk_seconds)
+        if idx < 0:
+            idx = 0
+        if idx >= chunk_count:
+            idx = chunk_count - 1
+        chunks[idx].append(cue)
 
     return chunks
 
 
+def first_cue_start_index(lines: List[str]) -> Optional[int]:
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+        if stripped.startswith("NOTE"):
+            i += 1
+            while i < len(lines) and lines[i].strip():
+                i += 1
+            continue
+        if TIMING_LINE_RE.match(stripped):
+            return i
+        if i + 1 < len(lines) and TIMING_LINE_RE.match(lines[i + 1].strip()):
+            return i
+        i += 1
+    return None
+
+
 def split_vtt_file(vtt_text: str, chunk_seconds: int) -> List[str]:
     normalized = vtt_text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    lines = normalized.split("\n")
     has_timing_line = any(TIMING_LINE_RE.match(line.strip()) for line in normalized.split("\n"))
-    first_content_line = next((line.strip() for line in normalized.split("\n") if line.strip()), "")
+    first_content_line = next((line.strip() for line in lines if line.strip()), "")
+    header_lines: List[str] = []
     if first_content_line != "WEBVTT":
-        if has_timing_line:
-            normalized = f"WEBVTT\n\n{normalized}"
-        else:
+        if not has_timing_line:
             raise ValueError(
                 "Datei ist kein gueltiges WebVTT. Bitte pruefe: UTF-8 Kodierung, "
                 "Zeitzeilen im Format 00:00:00.000 --> 00:00:05.000 und Leerzeilen "
                 "zwischen den Untertitelbloecken."
             )
+    else:
+        cue_start = first_cue_start_index(lines)
+        if cue_start is not None:
+            header_lines = lines[:cue_start]
+        else:
+            header_lines = lines
 
     cues = parse_vtt(normalized)
     if not cues:
@@ -367,7 +376,14 @@ def split_vtt_file(vtt_text: str, chunk_seconds: int) -> List[str]:
             "(00:00:00.000 --> 00:00:05.000) und die Blockstruktur der Datei."
         )
     chunks = split_cues(cues, chunk_seconds)
-    return [render_vtt(chunk) for chunk in chunks]
+    return [
+        render_vtt(
+            chunk,
+            include_header=(idx == 0),
+            header_lines=header_lines,
+        )
+        for idx, chunk in enumerate(chunks)
+    ]
 
 
 def parse_multipart_form(

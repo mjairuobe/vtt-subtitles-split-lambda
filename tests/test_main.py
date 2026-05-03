@@ -67,7 +67,7 @@ class VttSplitTests(unittest.TestCase):
         chunks = split_vtt_file(vtt_text=vtt_text, chunk_seconds=60)
         self.assertEqual(16, len(chunks))
         self.assertTrue(chunks[0].startswith("WEBVTT"))
-        self.assertTrue(chunks[-1].startswith("WEBVTT"))
+        self.assertFalse(chunks[-1].startswith("WEBVTT"))
 
     def test_handler_returns_zip_with_numbered_vtt_files(self):
         vtt_text = (
@@ -102,7 +102,36 @@ class VttSplitTests(unittest.TestCase):
             content_1 = zf.read("untertitel-1.vtt").decode("utf-8")
             content_2 = zf.read("untertitel-2.vtt").decode("utf-8")
             self.assertIn("00:00:00.000 --> 00:00:02.000", content_1)
-            self.assertIn("00:00:00.000 --> 00:00:02.000", content_2)
+            self.assertIn("00:01:00.000 --> 00:01:02.000", content_2)
+            self.assertFalse(content_2.startswith("WEBVTT"))
+
+    def test_split_keeps_original_timestamps_and_header_only_in_first_file(self):
+        vtt_text = (
+            "WEBVTT\n"
+            "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n"
+            "00:05:00.000 --> 00:05:02.000\n"
+            "A\n\n"
+            "00:06:10.000 --> 00:06:12.000\n"
+            "B\n"
+        )
+        chunks = split_vtt_file(vtt_text=vtt_text, chunk_seconds=60)
+        self.assertEqual(2, len(chunks))
+        self.assertTrue(chunks[0].startswith("WEBVTT"))
+        self.assertIn("X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000", chunks[0])
+        self.assertIn("00:05:00.000 --> 00:05:02.000", chunks[0])
+        self.assertFalse(chunks[1].startswith("WEBVTT"))
+        self.assertIn("00:06:10.000 --> 00:06:12.000", chunks[1])
+
+    def test_split_count_uses_timeline_span_not_absolute_clock(self):
+        vtt_text = (
+            "WEBVTT\n\n"
+            "00:59:59.000 --> 01:00:01.000\n"
+            "Start\n\n"
+            "01:47:00.000 --> 01:47:02.000\n"
+            "Ende\n"
+        )
+        chunks = split_vtt_file(vtt_text=vtt_text, chunk_seconds=180)
+        self.assertEqual(16, len(chunks))
 
     def test_handler_accepts_txt_extension_with_webvtt_content(self):
         vtt_text = (
