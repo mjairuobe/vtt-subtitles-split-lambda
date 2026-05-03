@@ -2,7 +2,7 @@
 
 AWS Lambda (Python 3.11, Container Image), die als HTTP API zwei Aufgaben ueber dieselbe URL bereitstellt:
 - `GET`: statische Website mit Formular und Erklaerung
-- `POST`: Upload einer WebVTT-Datei (`multipart/form-data`) und ZIP-Download der gesplitteten VTT-Dateien
+- `POST`: Upload einer Datei mit Endung `.vtt` oder `.txt` (`multipart/form-data`) und ZIP-Download der gesplitteten VTT-Dateien
 
 Die Ausgabedateien werden als `<originalname>-1.vtt` ... `<originalname>-n.vtt` benannt.
 
@@ -30,7 +30,7 @@ Erwartetes Format:
 
 - `Content-Type: multipart/form-data`
 - Form-Felder:
-  - `file`: VTT-Datei (UTF-8)
+  - `file`: Datei mit Endung `.vtt` oder `.txt` (UTF-8, Inhalt muss WebVTT sein)
   - `t`: Integer > 0 (Sekunden)
 
 Alternativ kann `t` auch als Query-Parameter (`?t=60`) uebergeben werden.

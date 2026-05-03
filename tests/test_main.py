@@ -104,6 +104,31 @@ class VttSplitTests(unittest.TestCase):
             self.assertIn("00:00:00.000 --> 00:00:02.000", content_1)
             self.assertIn("00:00:00.000 --> 00:00:02.000", content_2)
 
+    def test_handler_accepts_txt_extension_with_webvtt_content(self):
+        vtt_text = (
+            "WEBVTT\n\n"
+            "00:00:00.000 --> 00:00:01.000\n"
+            "Hallo\n"
+        )
+        boundary = "----WebKitFormBoundaryTxtUpload"
+        body = build_multipart_body(
+            boundary=boundary,
+            file_name="untertitel.txt",
+            file_content=vtt_text,
+            t_value="60",
+        )
+        event = {
+            "headers": {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            "body": base64.b64encode(body).decode("ascii"),
+            "isBase64Encoded": True,
+        }
+
+        result = handler(event, None)
+        self.assertEqual(200, result["statusCode"])
+        zip_bytes = base64.b64decode(result["body"])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            self.assertEqual(["untertitel-1.vtt"], zf.namelist())
+
     def test_handler_rejects_missing_t(self):
         boundary = "----WebKitFormBoundaryMissingT"
         body = (

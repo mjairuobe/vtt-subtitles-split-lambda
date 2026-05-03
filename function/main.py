@@ -114,8 +114,8 @@ HOME_PAGE_HTML = """<!doctype html>
 
         <form id="split-form" method="post" enctype="multipart/form-data">
           <label>
-            VTT-Datei
-            <input name="file" type="file" accept=".vtt,text/vtt" required />
+            Untertitel-Datei (.vtt oder .txt mit WEBVTT-Inhalt)
+            <input name="file" type="file" accept=".vtt,.txt,text/vtt,text/plain" required />
           </label>
           <label>
             Chunk-Groesse t (Sekunden)
