@@ -114,7 +114,7 @@ HOME_PAGE_HTML = """<!doctype html>
 
         <form id="split-form" method="post" enctype="multipart/form-data">
           <label>
-            Untertitel-Datei (.vtt oder .txt mit WEBVTT-Inhalt)
+            Untertitel-Datei (.vtt oder .txt, WEBVTT-Header optional)
             <input name="file" type="file" accept=".vtt,.txt,text/vtt,text/plain" required />
           </label>
           <label>
@@ -348,11 +348,24 @@ def split_cues(cues: List[Cue], chunk_seconds: int) -> List[List[Cue]]:
 
 def split_vtt_file(vtt_text: str, chunk_seconds: int) -> List[str]:
     normalized = vtt_text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    has_timing_line = any(TIMING_LINE_RE.match(line.strip()) for line in normalized.split("\n"))
     first_content_line = next((line.strip() for line in normalized.split("\n") if line.strip()), "")
     if first_content_line != "WEBVTT":
-        raise ValueError("Uploaded file is not a valid WebVTT file (missing WEBVTT header)")
+        if has_timing_line:
+            normalized = f"WEBVTT\n\n{normalized}"
+        else:
+            raise ValueError(
+                "Datei ist kein gueltiges WebVTT. Bitte pruefe: UTF-8 Kodierung, "
+                "Zeitzeilen im Format 00:00:00.000 --> 00:00:05.000 und Leerzeilen "
+                "zwischen den Untertitelbloecken."
+            )
 
-    cues = parse_vtt(vtt_text)
+    cues = parse_vtt(normalized)
+    if not cues:
+        raise ValueError(
+            "Keine gueltigen Untertitel-Cues gefunden. Bitte pruefe das Zeitformat "
+            "(00:00:00.000 --> 00:00:05.000) und die Blockstruktur der Datei."
+        )
     chunks = split_cues(cues, chunk_seconds)
     return [render_vtt(chunk) for chunk in chunks]
 
@@ -489,7 +502,7 @@ def handle_split_request(event: Dict[str, object]) -> Dict[str, object]:
         try:
             vtt_text = upload_bytes.decode("utf-8-sig")
         except UnicodeDecodeError:
-            return json_response(400, {"error": "Only UTF-8 encoded VTT files are supported"})
+            return json_response(400, {"error": "Only UTF-8 encoded subtitle files are supported"})
 
         split_files = split_vtt_file(vtt_text=vtt_text, chunk_seconds=chunk_seconds)
 

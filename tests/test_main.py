@@ -129,6 +129,53 @@ class VttSplitTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
             self.assertEqual(["untertitel-1.vtt"], zf.namelist())
 
+    def test_handler_accepts_missing_webvtt_header_if_timing_lines_exist(self):
+        subtitle_text = (
+            "00:00:00.000 --> 00:00:01.000\n"
+            "Hallo\n"
+        )
+        boundary = "----WebKitFormBoundaryNoHeader"
+        body = build_multipart_body(
+            boundary=boundary,
+            file_name="untertitel.txt",
+            file_content=subtitle_text,
+            t_value="60",
+        )
+        event = {
+            "headers": {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            "body": base64.b64encode(body).decode("ascii"),
+            "isBase64Encoded": True,
+        }
+
+        result = handler(event, None)
+        self.assertEqual(200, result["statusCode"])
+        zip_bytes = base64.b64decode(result["body"])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            self.assertEqual(["untertitel-1.vtt"], zf.namelist())
+            content_1 = zf.read("untertitel-1.vtt").decode("utf-8")
+            self.assertTrue(content_1.startswith("WEBVTT"))
+
+    def test_handler_error_message_contains_syntax_hints_for_invalid_content(self):
+        invalid_content = "Das ist keine Untertiteldatei.\nNur normaler Text.\n"
+        boundary = "----WebKitFormBoundaryInvalidSyntax"
+        body = build_multipart_body(
+            boundary=boundary,
+            file_name="untertitel.txt",
+            file_content=invalid_content,
+            t_value="60",
+        )
+        event = {
+            "headers": {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            "body": base64.b64encode(body).decode("ascii"),
+            "isBase64Encoded": True,
+        }
+
+        result = handler(event, None)
+        self.assertEqual(400, result["statusCode"])
+        payload = json.loads(result["body"])
+        self.assertIn("Datei ist kein gueltiges WebVTT", payload["error"])
+        self.assertIn("Zeitzeilen", payload["error"])
+
     def test_handler_rejects_missing_t(self):
         boundary = "----WebKitFormBoundaryMissingT"
         body = (

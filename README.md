@@ -30,10 +30,14 @@ Erwartetes Format:
 
 - `Content-Type: multipart/form-data`
 - Form-Felder:
-  - `file`: Datei mit Endung `.vtt` oder `.txt` (UTF-8, Inhalt muss WebVTT sein)
+  - `file`: Datei mit Endung `.vtt` oder `.txt` (UTF-8, Inhalt muss WebVTT-aehnlich sein)
   - `t`: Integer > 0 (Sekunden)
 
 Alternativ kann `t` auch als Query-Parameter (`?t=60`) uebergeben werden.
+
+Hinweis:
+- Falls der `WEBVTT`-Header fehlt, ergaenzt die Lambda ihn automatisch, **wenn** gueltige Zeitzeilen gefunden werden.
+- Zeitzeilen muessen so aussehen: `00:00:00.000 --> 00:00:05.000`
 
 ## Lambda Responses
 
@@ -52,6 +56,22 @@ Bei Erfolg:
 ### Bei nicht erlaubter Methode (z. B. `PUT`):
 - `statusCode: 405`
 - JSON-Fehler mit Hinweis auf erlaubte Methoden (`GET`, `POST`)
+
+## Troubleshooting: "Datei ist kein gueltiges WebVTT"
+
+Pruefe deine Datei in einem Editor:
+1. UTF-8 Kodierung
+2. Untertitel-Bloecke mit Zeitzeile im Format `00:00:00.000 --> 00:00:05.000`
+3. Leerzeile zwischen den Bloecken
+
+Minimales gueltiges Beispiel:
+
+```text
+WEBVTT
+
+00:00:00.000 --> 00:00:02.000
+Hallo Welt
+```
 
 ## Projektstruktur
 
